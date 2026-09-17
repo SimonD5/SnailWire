@@ -323,7 +323,7 @@ function CanvasComponentEl({
       {(component.pins || []).map(pin => (
         <div
           key={pin.id}
-          className="absolute z-20"
+          className="absolute z-20 pin-label-el"
           style={{
             left: `${pin.x}%`,
             top: `${pin.y}%`,
@@ -560,6 +560,17 @@ export default function Editeur() {
   const [camera, setCamera] = useState(initialState.camera || { x: 0, y: 0, z: 1 });
   const [isPanning, setIsPanning] = useState(false);
 
+  // PNG Export options
+  const [exportPNGOpen, setExportPNGOpen] = useState(false);
+  const [exportOptions, setExportOptions] = useState({
+    showPins: true,
+    quality: 'medium' as 'low' | 'medium' | 'high',
+    zoneMode: 'all' as 'all' | 'zone',
+  });
+  const [exportZone, setExportZone] = useState<{x: number, y: number, w: number, h: number} | null>(null);
+  const [selectingZone, setSelectingZone] = useState(false);
+  const [zoneDraft, setZoneDraft] = useState<{sx: number, sy: number, ex: number, ey: number} | null>(null);
+
   // Prevent body scrolling while in editor
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -613,53 +624,58 @@ export default function Editeur() {
       alert("Le schéma est vide.");
       return;
     }
+    setExportPNGOpen(true);
+  };
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    const addPoint = (x: number, y: number) => {
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    };
+  const doExportPNG = () => {
+    const pixelRatio = exportOptions.quality === 'low' ? 1 : exportOptions.quality === 'medium' ? 2 : 3;
 
-    canvasComponents.forEach(c => {
-      const baseComp = components.find(comp => comp.id === c.componentId);
-      if (baseComp) {
-        const PX_PER_MM = 2.5;
-        const w = baseComp.widthMm * PX_PER_MM;
-        const h = baseComp.heightMm * PX_PER_MM;
-        addPoint(c.x, c.y);
-        addPoint(c.x + w, c.y + h);
-      }
-    });
+    let minX: number, minY: number, width: number, height: number;
 
-    wires.forEach(w => w.points.forEach(p => addPoint(p.x, p.y)));
-    textElements.forEach(t => { addPoint(t.x, t.y); addPoint(t.x + 150, t.y + 40); });
-    postits.forEach(p => { addPoint(p.x, p.y); addPoint(p.x + p.width, p.y + p.height); });
+    if (exportOptions.zoneMode === 'zone' && exportZone) {
+      minX = exportZone.x;
+      minY = exportZone.y;
+      width = exportZone.w;
+      height = exportZone.h;
+    } else {
+      let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+      const addPoint = (x: number, y: number) => {
+        if (x < bMinX) bMinX = x; if (x > bMaxX) bMaxX = x;
+        if (y < bMinY) bMinY = y; if (y > bMaxY) bMaxY = y;
+      };
+      canvasComponents.forEach(c => {
+        const baseComp = components.find(comp => comp.id === c.componentId);
+        if (baseComp) {
+          const PX_PER_MM = 2.5;
+          const w = baseComp.widthMm * PX_PER_MM;
+          const h = baseComp.heightMm * PX_PER_MM;
+          addPoint(c.x, c.y); addPoint(c.x + w, c.y + h);
+        }
+      });
+      wires.forEach(w => w.points.forEach(p => addPoint(p.x, p.y)));
+      textElements.forEach(t => { addPoint(t.x, t.y); addPoint(t.x + 150, t.y + 40); });
+      postits.forEach(p => { addPoint(p.x, p.y); addPoint(p.x + (p.width||200), p.y + (p.height||150)); });
+      const padding = 60;
+      minX = bMinX - padding; minY = bMinY - padding;
+      width = (bMaxX + padding) - minX;
+      height = (bMaxY + padding) - minY;
+    }
 
-    const padding = 60;
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
-
-    const width = maxX - minX;
-    const height = maxY - minY;
-
+    setExportPNGOpen(false);
     const originalCamera = { ...camera };
     setCamera({ x: -minX, y: -minY, z: 1 });
 
     setTimeout(async () => {
       const node = document.getElementById("snailwire-canvas-transform");
       if (node) {
+        // Temporarily hide pins if needed
+        const pinEls = node.querySelectorAll<HTMLElement>('.pin-label-el');
+        if (!exportOptions.showPins) pinEls.forEach(el => el.style.display = 'none');
         try {
           const dataUrl = await toPng(node, {
-            width: width,
-            height: height,
+            width, height, pixelRatio,
             backgroundColor: '#ffffff',
-            style: {
-              transform: `translate(${-minX}px, ${-minY}px) scale(1)`,
-            }
+            style: { transform: `translate(${-minX}px, ${-minY}px) scale(1)` }
           });
           const a = document.createElement("a");
           a.href = dataUrl;
@@ -668,6 +684,8 @@ export default function Editeur() {
         } catch (err) {
           console.error(err);
           alert("Erreur lors de l'exportation de l'image.");
+        } finally {
+          if (!exportOptions.showPins) pinEls.forEach(el => el.style.display = '');
         }
       }
       setCamera(originalCamera);
@@ -1359,7 +1377,7 @@ export default function Editeur() {
       <main
         ref={canvasRef as React.RefObject<HTMLElement>}
         tabIndex={0}
-        className={`flex-1 relative bg-white overflow-hidden outline-none ${isPanning ? "cursor-grabbing" : activeTool === "text" ? "cursor-text" : activeTool === "postit" ? "cursor-crosshair" : activeTool === "wire" ? "cursor-crosshair" : "cursor-default"}`}
+        className={`flex-1 relative bg-white overflow-hidden outline-none ${selectingZone ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : activeTool === "text" ? "cursor-text" : activeTool === "postit" ? "cursor-crosshair" : activeTool === "wire" ? "cursor-crosshair" : "cursor-default"}`}
         onKeyDown={(e) => {
           if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
           
@@ -1393,6 +1411,33 @@ export default function Editeur() {
           }
         }}
         onMouseDown={(e) => {
+          if (selectingZone) {
+            e.preventDefault();
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const sx = (e.clientX - rect.left - camera.x) / camera.z;
+            const sy = (e.clientY - rect.top - camera.y) / camera.z;
+            setZoneDraft({ sx, sy, ex: sx, ey: sy });
+            const onMove = (ev: MouseEvent) => {
+              const ex = (ev.clientX - rect.left - camera.x) / camera.z;
+              const ey = (ev.clientY - rect.top - camera.y) / camera.z;
+              setZoneDraft(d => d ? { ...d, ex, ey } : null);
+            };
+            const onUp = (ev: MouseEvent) => {
+              const ex = (ev.clientX - rect.left - camera.x) / camera.z;
+              const ey = (ev.clientY - rect.top - camera.y) / camera.z;
+              const x = Math.min(sx, ex), y = Math.min(sy, ey);
+              const w = Math.abs(ex - sx), h = Math.abs(ey - sy);
+              if (w > 10 && h > 10) setExportZone({ x, y, w, h });
+              setZoneDraft(null);
+              setSelectingZone(false);
+              setExportPNGOpen(true);
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+            return;
+          }
           canvasRef.current?.focus();
           handleCanvasMouseDown(e);
         }}
@@ -1404,6 +1449,7 @@ export default function Editeur() {
           }
         }}
         onContextMenu={(e) => {
+          if (selectingZone) { e.preventDefault(); return; }
           if (activeTool === "wire" && pendingWire) {
             e.preventDefault();
             handleCanvasMouseDown(e); // Trigger right click logic
@@ -1421,6 +1467,30 @@ export default function Editeur() {
               backgroundPosition: `${camera.x}px ${camera.y}px`
             }}
           />
+
+          {/* Zone draft rectangle (while dragging) */}
+          {selectingZone && zoneDraft && (() => {
+            const x = (Math.min(zoneDraft.sx, zoneDraft.ex) * camera.z) + camera.x;
+            const y = (Math.min(zoneDraft.sy, zoneDraft.ey) * camera.z) + camera.y;
+            const w = Math.abs(zoneDraft.ex - zoneDraft.sx) * camera.z;
+            const h = Math.abs(zoneDraft.ey - zoneDraft.sy) * camera.z;
+            return (
+              <div className="absolute pointer-events-none" style={{ left: x, top: y, width: w, height: h, border: '2px dashed #3b82f6', background: 'rgba(59,130,246,0.08)', zIndex: 100 }} />
+            );
+          })()}
+
+          {/* Stored export zone indicator */}
+          {!selectingZone && exportZone && exportOptions.zoneMode === 'zone' && (
+            <div className="absolute pointer-events-none" style={{
+              left: exportZone.x * camera.z + camera.x,
+              top: exportZone.y * camera.z + camera.y,
+              width: exportZone.w * camera.z,
+              height: exportZone.h * camera.z,
+              border: '2px solid #3b82f6',
+              background: 'rgba(59,130,246,0.05)',
+              zIndex: 100
+            }} />
+          )}
 
         {/* Espace transformé */}
         <div 
@@ -1849,6 +1919,116 @@ export default function Editeur() {
                   {listeningKeyFor && <p className="text-xs text-blue-600 mt-2">Appuyez sur une touche pour l'assigner (ou Échap pour annuler).</p>}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Zone selection banner */}
+      {selectingZone && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 bg-blue-600 text-white text-sm px-6 py-3 rounded-full shadow-xl flex items-center gap-3 pointer-events-none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+          Glissez pour sélectionner la zone à exporter — Clic droit pour annuler
+        </div>
+      )}
+
+      {/* PNG Export Modal */}
+      {exportPNGOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onMouseDown={() => setExportPNGOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onMouseDown={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-bold text-gray-900 flex items-center gap-2"><ImageIcon size={18} className="text-blue-500" /> Options d'export PNG</h2>
+              <button onClick={() => setExportPNGOpen(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+            </div>
+
+            <div className="px-6 py-5 space-y-6">
+
+              {/* Show pins toggle */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">Afficher les étiquettes de pins</span>
+                <button
+                  onClick={() => setExportOptions(o => ({ ...o, showPins: !o.showPins }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    exportOptions.showPins ? 'bg-blue-500' : 'bg-gray-200'
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    exportOptions.showPins ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
+                </button>
+              </div>
+
+              {/* Quality */}
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">Qualité de l'image</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['low', 'medium', 'high'] as const).map(q => (
+                    <button
+                      key={q}
+                      onClick={() => setExportOptions(o => ({ ...o, quality: q }))}
+                      className={`py-2 text-sm rounded-lg border font-medium transition-colors ${
+                        exportOptions.quality === q
+                          ? 'bg-blue-500 text-white border-blue-500'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+                      }`}
+                    >
+                      {q === 'low' ? 'Basse' : q === 'medium' ? 'Moyenne' : 'Haute'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">{exportOptions.quality === 'low' ? '1x — plus léger' : exportOptions.quality === 'medium' ? '2x — recommandé' : '3x — haute résolution'}</p>
+              </div>
+
+              {/* Zone */}
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">Zone exportée</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setExportOptions(o => ({ ...o, zoneMode: 'all' }))}
+                    className={`py-2 text-sm rounded-lg border font-medium transition-colors ${
+                      exportOptions.zoneMode === 'all'
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+                    }`}
+                  >
+                    Tout le schéma
+                  </button>
+                  <button
+                    onClick={() => {
+                      setExportPNGOpen(false);
+                      setExportOptions(o => ({ ...o, zoneMode: 'zone' }));
+                      setExportZone(null);
+                      setSelectingZone(true);
+                    }}
+                    className={`py-2 text-sm rounded-lg border font-medium transition-colors ${
+                      exportOptions.zoneMode === 'zone'
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+                    }`}
+                  >
+                    Sélectionner zone
+                  </button>
+                </div>
+                {exportOptions.zoneMode === 'zone' && exportZone && (
+                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                    Zone définie ({Math.round(exportZone.w)} × {Math.round(exportZone.h)} px)
+                    <button className="underline ml-1 text-gray-400" onClick={() => { setExportZone(null); setSelectingZone(true); setExportPNGOpen(false); }}>Modifier</button>
+                  </p>
+                )}
+                {exportOptions.zoneMode === 'zone' && !exportZone && (
+                  <p className="text-xs text-orange-500 mt-1">Aucune zone sélectionnée — cliquez sur "Sélectionner zone" pour dessiner.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="px-6 pb-5">
+              <button
+                onClick={doExportPNG}
+                disabled={exportOptions.zoneMode === 'zone' && !exportZone}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <Download size={16} /> Exporter le PNG
+              </button>
             </div>
           </div>
         </div>
