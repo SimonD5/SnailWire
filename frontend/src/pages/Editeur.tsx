@@ -1,9 +1,10 @@
 import { Link } from "react-router-dom";
 import { site } from "../config/site";
 import {
-  MousePointer2, Type, StickyNote, Cable, GripHorizontal, Plus, Trash2, X, RotateCw, Focus, Settings, Download, Upload, ChevronDown, File, Pencil, Undo2, Redo2
+  MousePointer2, Type, StickyNote, Cable, GripHorizontal, Plus, Trash2, X, RotateCw, Focus, Settings, Download, Upload, ChevronDown, File, Pencil, Undo2, Redo2, Image as ImageIcon
 } from "lucide-react";
 import { useRef, useState, useEffect, useCallback } from "react";
+import { toPng } from "html-to-image";
 import { useDraggable } from "../hooks/useDraggable";
 import { PostItCard, type PostitData } from "../components/PostItCard";
 import AddComponentWizard, { type ComponentItem } from "../components/AddComponentWizard";
@@ -194,6 +195,7 @@ function CanvasComponentEl({
   zoom,
   activeTool,
   snapToGrid,
+  pinLabelScale = 1.0,
 }: {
   el: CanvasComponent;
   component?: ComponentItem;
@@ -204,8 +206,10 @@ function CanvasComponentEl({
   zoom: number;
   activeTool: Tool;
   snapToGrid: (val: number) => number;
+  pinLabelScale?: number;
 }) {
   const PX_PER_MM = 2.5;
+  const scale = pinLabelScale || 1.0;
 
   if (!component) return null;
 
@@ -332,20 +336,20 @@ function CanvasComponentEl({
             position: "absolute",
             transform: `translate(-50%, -50%) scale(${1 / zoom})`,
             transformOrigin: "center center",
-            height: "16px",
-            minWidth: "16px",
-            padding: "0 6px",
-            borderRadius: "8px",
+            height: `${16 * scale}px`,
+            minWidth: `${16 * scale}px`,
+            padding: `0 ${6 * scale}px`,
+            borderRadius: `${8 * scale}px`,
             background: "#e11d48",
-            border: "2px solid #fff",
-            boxShadow: "0 0 0 1px #e11d48, 0 2px 4px rgba(225,29,72,0.4)",
+            border: `${2 * scale}px solid #fff`,
+            boxShadow: `0 0 0 ${1 * scale}px #e11d48, 0 ${2 * scale}px ${4 * scale}px rgba(225,29,72,0.4)`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             pointerEvents: "none",
             whiteSpace: "nowrap",
           }}>
-            <span style={{ color: "#fff", fontSize: "9px", fontFamily: "var(--font-mono)", fontWeight: 700, lineHeight: 1 }}>{pin.name}</span>
+            <span style={{ color: "#fff", fontSize: `${9 * scale}px`, fontFamily: "var(--font-mono)", fontWeight: 700, lineHeight: 1 }}>{pin.name}</span>
           </div>
         </div>
       ))}
@@ -577,7 +581,7 @@ export default function Editeur() {
   const defaultShortcuts = { select: 'v', wire: 'w', text: 't', postit: 'p' };
   const loadedSettings = initialState.settings || {};
   const [settings, setSettings] = useState({ 
-    wireWidth: 2, gridSize: 12, snapEnabled: true,
+    wireWidth: 2, gridSize: 12, snapEnabled: true, pinLabelScale: 1.0,
     ...loadedSettings,
     shortcuts: { ...defaultShortcuts, ...(loadedSettings.shortcuts || {}) }
   });
@@ -601,6 +605,73 @@ export default function Editeur() {
     a.click();
     URL.revokeObjectURL(url);
     setFileMenuOpen(false);
+  };
+
+  const handleExportPNG = () => {
+    setFileMenuOpen(false);
+    if (!canvasComponents.length && !wires.length && !textElements.length && !postits.length) {
+      alert("Le schéma est vide.");
+      return;
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const addPoint = (x: number, y: number) => {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    };
+
+    canvasComponents.forEach(c => {
+      const baseComp = components.find(comp => comp.id === c.componentId);
+      if (baseComp) {
+        const PX_PER_MM = 2.5;
+        const w = baseComp.widthMm * PX_PER_MM;
+        const h = baseComp.heightMm * PX_PER_MM;
+        addPoint(c.x, c.y);
+        addPoint(c.x + w, c.y + h);
+      }
+    });
+
+    wires.forEach(w => w.points.forEach(p => addPoint(p.x, p.y)));
+    textElements.forEach(t => { addPoint(t.x, t.y); addPoint(t.x + 150, t.y + 40); });
+    postits.forEach(p => { addPoint(p.x, p.y); addPoint(p.x + p.width, p.y + p.height); });
+
+    const padding = 60;
+    minX -= padding;
+    minY -= padding;
+    maxX += padding;
+    maxY += padding;
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+
+    const originalCamera = { ...camera };
+    setCamera({ x: -minX, y: -minY, z: 1 });
+
+    setTimeout(async () => {
+      const node = document.getElementById("snailwire-canvas-transform");
+      if (node) {
+        try {
+          const dataUrl = await toPng(node, {
+            width: width,
+            height: height,
+            backgroundColor: '#ffffff',
+            style: {
+              transform: `translate(${-minX}px, ${-minY}px) scale(1)`,
+            }
+          });
+          const a = document.createElement("a");
+          a.href = dataUrl;
+          a.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
+          a.click();
+        } catch (err) {
+          console.error(err);
+          alert("Erreur lors de l'exportation de l'image.");
+        }
+      }
+      setCamera(originalCamera);
+    }, 200);
   };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1247,7 +1318,10 @@ export default function Editeur() {
                   <File size={16} className="text-gray-400" /> Nouveau
                 </button>
                 <button onClick={handleExport} className="flex items-center w-full gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left">
-                  <Download size={16} className="text-gray-400" /> Exporter
+                  <Download size={16} className="text-gray-400" /> Exporter (.json)
+                </button>
+                <button onClick={handleExportPNG} className="flex items-center w-full gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left">
+                  <ImageIcon size={16} className="text-gray-400" /> Exporter en Image (PNG)
                 </button>
                 <label className="flex items-center w-full gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left cursor-pointer">
                   <Upload size={16} className="text-gray-400" /> Importer
@@ -1350,6 +1424,7 @@ export default function Editeur() {
 
         {/* Espace transformé */}
         <div 
+          id="snailwire-canvas-transform"
           className="absolute inset-0"
           style={{ 
             transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.z})`, 
@@ -1461,6 +1536,7 @@ export default function Editeur() {
                 zoom={camera.z}
                 activeTool={activeTool}
                 snapToGrid={snapToGrid}
+                pinLabelScale={settings.pinLabelScale}
               />
             );
           })}
@@ -1703,6 +1779,19 @@ export default function Editeur() {
                     className="flex-1"
                   />
                   <span className="text-sm font-mono text-gray-500 w-8">{settings.gridSize}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Taille des étiquettes (Pins)</label>
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="range" min="0.5" max="3.0" step="0.1"
+                    value={settings.pinLabelScale || 1.0} 
+                    onChange={e => setSettings({ ...settings, pinLabelScale: Number(e.target.value) })}
+                    className="flex-1"
+                  />
+                  <span className="text-sm font-mono text-gray-500 w-8">x{(settings.pinLabelScale || 1.0).toFixed(1)}</span>
                 </div>
               </div>
 
