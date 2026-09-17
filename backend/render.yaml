@@ -1,0 +1,13 @@
+# Blueprint Render — optionnel : permet de créer le service en un clic
+# via "New +" > "Blueprint" sur https://dashboard.render.com
+services:
+  - type: web
+    name: snailwire-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: FRONTEND_ORIGIN
+        sync: false
+
