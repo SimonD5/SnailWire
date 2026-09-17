@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import CircuitHero from "../components/CircuitHero";
-import { DatasheetIcon, BoardIcon } from "../components/icons";
+import { BoardIcon } from "../components/icons";
 
 export default function Home() {
   return (

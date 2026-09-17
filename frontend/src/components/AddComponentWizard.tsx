@@ -96,7 +96,6 @@ function ImageCropper({
   onCrop: (dataUrl: string) => void;
   onCancel: () => void;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef    = useRef<HTMLImageElement>(null);
   
   // crop box in percentages [0-100]

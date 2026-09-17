@@ -660,7 +660,7 @@ export default function Editeur() {
   const historyRef = useRef<any[]>([]);
   const historyIndexRef = useRef(-1);
   const isUndoRedoRef = useRef(false);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     historyRef.current = [{ textElements, postits, canvasComponents, wires }];
@@ -803,7 +803,7 @@ export default function Editeur() {
     const handleWheelNative = (e: WheelEvent) => {
       e.preventDefault();
       const zoomSensitivity = 0.002;
-      setCamera(prevCam => {
+      setCamera((prevCam: {x: number, y: number, z: number}) => {
         const newZ = Math.min(Math.max(0.1, prevCam.z - e.deltaY * zoomSensitivity), 50);
         const rect = el.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
@@ -979,7 +979,7 @@ export default function Editeur() {
       const startX = e.clientX, startY = e.clientY;
       const startCamX = camera.x, startCamY = camera.y;
       const onMove = (ev: MouseEvent) => {
-        setCamera(prev => ({ ...prev, x: startCamX + ev.clientX - startX, y: startCamY + ev.clientY - startY }));
+        setCamera((prev: {x: number, y: number, z: number}) => ({ ...prev, x: startCamX + ev.clientX - startX, y: startCamY + ev.clientY - startY }));
       };
       const onUp = () => {
         setIsPanning(false);
